@@ -14,6 +14,7 @@
         body {
             font-family: 'Arial', sans-serif;
             overflow: hidden;
+            background-color: #000;
         }
 
         header {
@@ -22,7 +23,7 @@
             left: 0;
             width: 100%;
             height: 60px;
-            background-color: rgba(0, 0, 0, 0.7);
+            background-color: rgba(255, 255, 255, 0.9);
             display: flex;
             justify-content: center;
             align-items: center;
@@ -61,28 +62,22 @@
             opacity: 0;
             background-size: cover;
             background-position: center;
-            transition: opacity 1s ease-in-out;
-            z-index: 1;
+            transition: opacity 1.2s ease;
+            transform: scale(1.1);
         }
 
         .slide.active {
             opacity: 1;
             z-index: 2;
-            animation: zoom-out 6000ms linear forwards;
+            animation: zoomOut 6s linear forwards;
         }
 
-        @keyframes zoom-out {
+        @keyframes zoomOut {
             0% {
                 transform: scale(1.1);
-                opacity: 1;
-            }
-            80% {
-                transform: scale(1.02);
-                opacity: 1;
             }
             100% {
                 transform: scale(1);
-                opacity: 0;
             }
         }
 
@@ -113,31 +108,6 @@
             z-index: 2000;
             display: none;
         }
-        
-        .admin-link {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            width: 40px;
-            height: 40px;
-            background-color: rgba(255, 255, 255, 0.2);
-            border-radius: 50%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            cursor: pointer;
-            z-index: 1001;
-            transition: background-color 0.3s;
-        }
-
-        .admin-link:hover {
-            background-color: rgba(255, 255, 255, 0.4);
-        }
-
-        .admin-icon {
-            color: white;
-            font-size: 20px;
-        }
     </style>
 </head>
 <body>
@@ -146,13 +116,9 @@
 
     <header>
         <div class="logo">
-            <img src="https://images.unsplash.com/photo-1572375992501-4b0892d50c69?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=120&q=80" alt="ロゴ"> SLIDESHOW
+            <img src="https://storage.googleapis.com/studio-design-asset-files/projects/JgqeZXgBak/s-350x82_webp_22eb2275-f03d-4f5e-8d51-b8729698d844.webp" alt="ロゴ">
         </div>
     </header>
-
-    <a href="#" class="admin-link" title="管理画面" id="adminLink">
-        <span class="admin-icon">⚙️</span>
-    </a>
 
     <div class="slideshow-container" id="slideshowContainer">
         <!-- スライドはJavaScriptで動的に生成されます -->
@@ -163,27 +129,10 @@
             const slideshowContainer = document.getElementById('slideshowContainer');
             const loadingElement = document.querySelector('.loading');
             const errorMessageElement = document.getElementById('errorMessage');
-            const adminLink = document.getElementById('adminLink');
             
-            // Notionデータベースへのリンク
-            const notionDatabaseUrl = 'https://www.notion.so/passion-for-beer/1bbdfcf4d226807c964ee75944dfcd0f?v=1bbdfcf4d22680b88c2a000c66283443';
-            
-            adminLink.addEventListener('click', function(e) {
-                e.preventDefault();
-                
-                // 簡易パスワード保護（実運用ではより安全な方法を推奨）
-                const password = prompt('管理者パスワードを入力してください:');
-                if (password === 'slideshow-admin') { // 実際の実装ではもっと安全なパスワードを使用してください
-                    window.open(notionDatabaseUrl, '_blank');
-                } else if (password) {
-                    alert('パスワードが正しくありません');
-                }
-            });
-            
-            let currentSlide = 0;
+            let currentSlideIndex = 0;
             const slideInterval = 6000; // 6000msec
-            let slidesData = [];
-            let slidesElements = [];
+            let slides = [];
             let slideTimer;
             
             // Netlify FunctionからNotionのデータを取得
@@ -212,6 +161,7 @@
                 }
                 
                 slideshowContainer.innerHTML = '';
+                slides = [];
                 
                 images.forEach((image, index) => {
                     const slide = document.createElement('div');
@@ -219,13 +169,11 @@
                     slide.style.backgroundImage = `url('${image.imageUrl}')`;
                     
                     slideshowContainer.appendChild(slide);
-                    slidesElements.push(slide);
+                    slides.push(slide);
                 });
                 
                 // 最初のスライドを表示
-                if (slidesElements.length > 0) {
-                    slidesElements[0].classList.add('active');
-                }
+                slides[0].classList.add('active');
                 
                 // スライドショーを開始
                 startSlideshow();
@@ -247,16 +195,25 @@
             
             // 次のスライドに切り替え
             function nextSlide() {
-                if (slidesElements.length === 0) return;
+                if (slides.length <= 1) return;
                 
-                // 現在のスライドからアクティブクラスを削除
-                slidesElements[currentSlide].classList.remove('active');
+                // 次のスライドインデックスを計算
+                const nextSlideIndex = (currentSlideIndex + 1) % slides.length;
                 
-                // 次のスライドのインデックスを計算
-                currentSlide = (currentSlide + 1) % slidesElements.length;
+                // 次のスライドを表示状態にする（ズームアニメーションは自動的に開始される）
+                slides[nextSlideIndex].classList.add('active');
                 
-                // 次のスライドにアクティブクラスを追加
-                slidesElements[currentSlide].classList.add('active');
+                // 現在のスライドのアニメーションを終了し、非アクティブにする（透過処理）
+                setTimeout(() => {
+                    slides[currentSlideIndex].style.opacity = '0';
+                    
+                    // アニメーション終了後に非アクティブにする
+                    setTimeout(() => {
+                        slides[currentSlideIndex].classList.remove('active');
+                        slides[currentSlideIndex].style.removeProperty('opacity');
+                        currentSlideIndex = nextSlideIndex;
+                    }, 1200);
+                }, 100);
             }
             
             // エラーメッセージを表示
