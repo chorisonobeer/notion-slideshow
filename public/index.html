@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notion連携スライドショー</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+        }
+
+        header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 60px;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .logo {
+            height: 40px;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+        }
+
+        .logo img {
+            height: 100%;
+            margin-right: 10px;
+        }
+
+        .slideshow-container {
+            width: 100%;
+            height: 100vh;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .slide {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            background-size: cover;
+            background-position: center;
+            transition: opacity 1s ease-in-out;
+            z-index: 1;
+        }
+
+        .slide.active {
+            opacity: 1;
+            z-index: 2;
+            animation: zoom-out 6000ms linear forwards;
+        }
+
+        @keyframes zoom-out {
+            0% {
+                transform: scale(1.1);
+                opacity: 1;
+            }
+            80% {
+                transform: scale(1.02);
+                opacity: 1;
+            }
+            100% {
+                transform: scale(1);
+                opacity: 0;
+            }
+        }
+
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            color: white;
+            font-size: 24px;
+        }
+
+        .error-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 20px;
+            background-color: rgba(255, 0, 0, 0.8);
+            color: white;
+            border-radius: 5px;
+            z-index: 2000;
+            display: none;
+        }
+        
+        .admin-link {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            width: 40px;
+            height: 40px;
+            background-color: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            z-index: 1001;
+            transition: background-color 0.3s;
+        }
+
+        .admin-link:hover {
+            background-color: rgba(255, 255, 255, 0.4);
+        }
+
+        .admin-icon {
+            color: white;
+            font-size: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="loading">読み込み中...</div>
+    <div class="error-message" id="errorMessage"></div>
+
+    <header>
+        <div class="logo">
+            <img src="https://images.unsplash.com/photo-1572375992501-4b0892d50c69?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=120&q=80" alt="ロゴ"> SLIDESHOW
+        </div>
+    </header>
+
+    <a href="#" class="admin-link" title="管理画面" id="adminLink">
+        <span class="admin-icon">⚙️</span>
+    </a>
+
+    <div class="slideshow-container" id="slideshowContainer">
+        <!-- スライドはJavaScriptで動的に生成されます -->
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const slideshowContainer = document.getElementById('slideshowContainer');
+            const loadingElement = document.querySelector('.loading');
+            const errorMessageElement = document.getElementById('errorMessage');
+            const adminLink = document.getElementById('adminLink');
+            
+            // Notionデータベースへのリンク
+            const notionDatabaseUrl = 'https://www.notion.so/passion-for-beer/1bbdfcf4d226807c964ee75944dfcd0f?v=1bbdfcf4d22680b88c2a000c66283443';
+            
+            adminLink.addEventListener('click', function(e) {
+                e.preventDefault();
+                
+                // 簡易パスワード保護（実運用ではより安全な方法を推奨）
+                const password = prompt('管理者パスワードを入力してください:');
+                if (password === 'slideshow-admin') { // 実際の実装ではもっと安全なパスワードを使用してください
+                    window.open(notionDatabaseUrl, '_blank');
+                } else if (password) {
+                    alert('パスワードが正しくありません');
+                }
+            });
+            
+            let currentSlide = 0;
+            const slideInterval = 6000; // 6000msec
+            let slidesData = [];
+            let slidesElements = [];
+            let slideTimer;
+            
+            // Netlify FunctionからNotionのデータを取得
+            async function fetchImagesFromNotion() {
+                try {
+                    const response = await fetch('/.netlify/functions/get-images');
+                    if (!response.ok) {
+                        throw new Error('サーバーからデータを取得できませんでした');
+                    }
+                    
+                    const data = await response.json();
+                    console.log('Fetched data:', data);
+                    return data.images;
+                } catch (error) {
+                    console.error('Error fetching images:', error);
+                    showError('画像データの取得中にエラーが発生しました。ページを再読み込みしてください。');
+                    return [];
+                }
+            }
+            
+            // スライドを生成する
+            function createSlides(images) {
+                if (!images || images.length === 0) {
+                    showError('表示できる画像がありません。Notionデータベースに画像を追加してください。');
+                    return;
+                }
+                
+                slideshowContainer.innerHTML = '';
+                
+                images.forEach((image, index) => {
+                    const slide = document.createElement('div');
+                    slide.className = 'slide';
+                    slide.style.backgroundImage = `url('${image.imageUrl}')`;
+                    
+                    slideshowContainer.appendChild(slide);
+                    slidesElements.push(slide);
+                });
+                
+                // 最初のスライドを表示
+                if (slidesElements.length > 0) {
+                    slidesElements[0].classList.add('active');
+                }
+                
+                // スライドショーを開始
+                startSlideshow();
+            }
+            
+            // スライドショーを開始
+            function startSlideshow() {
+                // 既存のタイマーをクリア
+                if (slideTimer) {
+                    clearInterval(slideTimer);
+                }
+                
+                // 新しいタイマーを設定
+                slideTimer = setInterval(nextSlide, slideInterval);
+                
+                // ローディングを非表示
+                loadingElement.style.display = 'none';
+            }
+            
+            // 次のスライドに切り替え
+            function nextSlide() {
+                if (slidesElements.length === 0) return;
+                
+                // 現在のスライドからアクティブクラスを削除
+                slidesElements[currentSlide].classList.remove('active');
+                
+                // 次のスライドのインデックスを計算
+                currentSlide = (currentSlide + 1) % slidesElements.length;
+                
+                // 次のスライドにアクティブクラスを追加
+                slidesElements[currentSlide].classList.add('active');
+            }
+            
+            // エラーメッセージを表示
+            function showError(message) {
+                errorMessageElement.textContent = message;
+                errorMessageElement.style.display = 'block';
+                loadingElement.style.display = 'none';
+            }
+            
+            // 初期化
+            async function initialize() {
+                try {
+                    const images = await fetchImagesFromNotion();
+                    createSlides(images);
+                } catch (error) {
+                    console.error('Initialization error:', error);
+                    showError('初期化中にエラーが発生しました。ページを再読み込みしてください。');
+                }
+            }
+            
+            // アプリケーション開始
+            initialize();
+        });
+    </script>
+</body>
+</html>
