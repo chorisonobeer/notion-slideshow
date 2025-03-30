@@ -40,6 +40,15 @@ exports.handler = async function(event, context) {
       debugInfo.databaseName = dbInfo.title[0]?.plain_text || "名称不明";
       debugInfo.propertyNames = Object.keys(dbInfo.properties);
       debugInfo.steps.push("データベース取得成功: " + debugInfo.databaseName);
+      
+      // プロパティの詳細をログに記録
+      debugInfo.properties = {};
+      Object.keys(dbInfo.properties).forEach(key => {
+        debugInfo.properties[key] = {
+          type: dbInfo.properties[key].type,
+          id: dbInfo.properties[key].id
+        };
+      });
     } catch (dbError) {
       debugInfo.steps.push("データベース取得エラー: " + dbError.message);
       debugInfo.dbError = {
@@ -53,102 +62,138 @@ exports.handler = async function(event, context) {
     // ステップ4: データベースクエリの実行
     debugInfo.steps.push("4. データベースのクエリ実行");
     
-    // クエリオプションの作成（プロパティ名を確認して適切に設定）
+    // クエリオプションの作成
     const queryOptions = {
       database_id: process.env.NOTION_DATABASE_ID
     };
     
-    // ソートプロパティが存在する場合のみソートを追加
-    if (debugInfo.propertyNames.includes("Order")) {
-      queryOptions.sorts = [{ property: "Order", direction: "ascending" }];
-    } else if (debugInfo.propertyNames.includes("order")) {
-      queryOptions.sorts = [{ property: "order", direction: "ascending" }];
+    // ソートプロパティの検出と設定
+    // "Order", "order", "順番" などの名前で検索
+    const orderProperties = debugInfo.propertyNames.filter(name => 
+      name.toLowerCase() === "order" || 
+      name.toLowerCase() === "順番" || 
+      name.toLowerCase() === "順序"
+    );
+    
+    if (orderProperties.length > 0) {
+      queryOptions.sorts = [{ property: orderProperties[0], direction: "ascending" }];
+      debugInfo.steps.push(`ソートプロパティを検出: ${orderProperties[0]}`);
     } else {
-      // 他の可能性のあるソートプロパティ名
-      const possibleSortProps = debugInfo.propertyNames.filter(name => 
-        name.toLowerCase() === "order" || 
-        name.toLowerCase() === "順番" || 
-        name.toLowerCase() === "順序"
-      );
-      
-      if (possibleSortProps.length > 0) {
-        queryOptions.sorts = [{ property: possibleSortProps[0], direction: "ascending" }];
-        debugInfo.steps.push(`見つかったソートプロパティ: ${possibleSortProps[0]}`);
-      } else {
-        debugInfo.steps.push("ソート可能なプロパティが見つからないため、ソートなしでクエリを実行します");
-      }
+      debugInfo.steps.push("ソートプロパティが見つからないため、ソートなしでクエリを実行します");
     }
     
     // クエリの実行
     const response = await notion.databases.query(queryOptions);
-    debugInfo.steps.push("クエリ成功: " + response.results.length + "件のレコードを取得");
+    debugInfo.steps.push(`クエリ成功: ${response.results.length}件のレコードを取得`);
     
-    // ステップ5: 画像URLの抽出
-    debugInfo.steps.push("5. 画像データの抽出");
-    
-    // 最初のレコードの構造をデバッグ情報に追加（存在する場合）
+    // デバッグ用に最初のレコードの構造を記録
     if (response.results.length > 0) {
+      debugInfo.firstRecordId = response.results[0].id;
       debugInfo.firstRecordProperties = Object.keys(response.results[0].properties);
       
-      // 画像プロパティを探す
-      const imageProperty = debugInfo.firstRecordProperties.find(prop => 
-        response.results[0].properties[prop].type === "files"
-      );
-      
-      if (imageProperty) {
-        debugInfo.steps.push(`画像プロパティを発見: ${imageProperty}`);
-        debugInfo.imageProperty = imageProperty;
-      } else {
-        debugInfo.steps.push("画像プロパティが見つかりません");
+      // プロパティの詳細を記録
+      debugInfo.firstRecordPropertyDetails = {};
+      Object.keys(response.results[0].properties).forEach(key => {
+        const prop = response.results[0].properties[key];
+        debugInfo.firstRecordPropertyDetails[key] = {
+          type: prop.type,
+          value: prop[prop.type]
+        };
+      });
+    }
+    
+    // ステップ5: 画像と時間データの抽出
+    debugInfo.steps.push("5. データの抽出");
+    
+    // timeプロパティの検出
+    let timePropertyName = null;
+    const timeProperties = debugInfo.propertyNames.filter(name => 
+      name.toLowerCase() === "time" || 
+      name.toLowerCase() === "時間" || 
+      name.toLowerCase() === "表示時間"
+    );
+    
+    if (timeProperties.length > 0) {
+      timePropertyName = timeProperties[0];
+      debugInfo.steps.push(`時間プロパティを検出: ${timePropertyName}`);
+    } else {
+      debugInfo.steps.push("時間プロパティが見つかりません");
+    }
+    
+    // 画像プロパティの検出
+    let imagePropertyName = null;
+    if (response.results.length > 0) {
+      // filesタイプのプロパティを探す
+      for (const key of Object.keys(response.results[0].properties)) {
+        const prop = response.results[0].properties[key];
+        if (prop.type === 'files') {
+          imagePropertyName = key;
+          debugInfo.steps.push(`画像プロパティを検出: ${imagePropertyName}`);
+          break;
+        }
       }
     }
     
-    // 画像URLの抽出
+    if (!imagePropertyName) {
+      debugInfo.steps.push("画像プロパティが見つかりません");
+    }
+    
+    // 画像URLとタイムデータの抽出
     const images = response.results.map(page => {
-      // ページのプロパティからタイトルを探す
-      const titleProp = Object.keys(page.properties).find(key => 
-        page.properties[key].type === "title"
-      );
-      
-      // 画像プロパティを探す
-      const imageProp = debugInfo.imageProperty || Object.keys(page.properties).find(key => 
-        page.properties[key].type === "files"
-      );
-      
-      // データ抽出
+      // メタデータを準備
       let imageUrl = '';
       let title = '';
       let order = 0;
+      let time = null;
       
-      // タイトルの抽出
-      if (titleProp && page.properties[titleProp].title && page.properties[titleProp].title.length > 0) {
-        title = page.properties[titleProp].title[0]?.plain_text || '';
+      // タイトルの抽出（titleタイプのプロパティから）
+      for (const key of Object.keys(page.properties)) {
+        const prop = page.properties[key];
+        if (prop.type === 'title' && prop.title && prop.title.length > 0) {
+          title = prop.title[0]?.plain_text || '';
+          break;
+        }
       }
       
       // 画像URLの抽出
-      if (imageProp && page.properties[imageProp].files && page.properties[imageProp].files.length > 0) {
-        const file = page.properties[imageProp].files[0];
+      if (imagePropertyName && page.properties[imagePropertyName] && 
+          page.properties[imagePropertyName].files && 
+          page.properties[imagePropertyName].files.length > 0) {
+        const file = page.properties[imagePropertyName].files[0];
         imageUrl = file.file?.url || file.external?.url || '';
       }
       
-      // 順序の抽出（ソートプロパティがある場合）
-      if (queryOptions.sorts && queryOptions.sorts.length > 0) {
-        const sortProp = queryOptions.sorts[0].property;
-        if (page.properties[sortProp] && page.properties[sortProp].number !== undefined) {
-          order = page.properties[sortProp].number;
+      // 順序の抽出
+      if (orderProperties.length > 0) {
+        const orderProp = page.properties[orderProperties[0]];
+        if (orderProp && orderProp.number !== undefined) {
+          order = orderProp.number;
         }
+      }
+      
+      // 時間の抽出
+      if (timePropertyName && page.properties[timePropertyName] && 
+          page.properties[timePropertyName].number !== undefined) {
+        time = page.properties[timePropertyName].number;
       }
       
       return {
         id: page.id,
         imageUrl,
         title,
-        order
+        order,
+        time
       };
     }).filter(image => image.imageUrl); // 画像URLがあるものだけフィルタリング
     
     debugInfo.extractedImages = images.length;
     debugInfo.steps.push(`${images.length}件の画像を抽出しました`);
+    
+    // 各画像のtime値を記録（デバッグ用）
+    debugInfo.imageTimes = images.map(img => ({
+      id: img.id,
+      time: img.time
+    }));
     
     return {
       statusCode: 200,

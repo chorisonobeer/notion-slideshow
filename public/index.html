@@ -22,8 +22,8 @@
             top: 0;
             left: 0;
             width: 100%;
-            height: 60px;
-            background-color: rgba(255, 255, 255, 0.9);
+            height: 40px;
+            background-color: rgba(255, 255, 255, 1);
             display: flex;
             justify-content: center;
             align-items: center;
@@ -31,19 +31,13 @@
         }
 
         .logo {
-            height: 40px;
-            color: white;
-            font-size: 24px;
-            font-weight: bold;
-            letter-spacing: 2px;
-            text-transform: uppercase;
+            height: 70%;
             display: flex;
             align-items: center;
         }
 
         .logo img {
             height: 100%;
-            margin-right: 10px;
         }
 
         .slideshow-container {
@@ -60,25 +54,23 @@
             width: 100%;
             height: 100%;
             opacity: 0;
-            background-size: cover;
-            background-position: center;
+            z-index: 1;
             transition: opacity 1.2s ease;
-            transform: scale(1.1);
         }
 
         .slide.active {
             opacity: 1;
             z-index: 2;
-            animation: zoomOut 6s linear forwards;
         }
 
-        @keyframes zoomOut {
-            0% {
-                transform: scale(1.1);
-            }
-            100% {
-                transform: scale(1);
-            }
+        .bg-image {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-size: cover;
+            background-position: center;
         }
 
         .loading {
@@ -121,7 +113,6 @@
     </header>
 
     <div class="slideshow-container" id="slideshowContainer">
-        <!-- スライドはJavaScriptで動的に生成されます -->
     </div>
 
     <script>
@@ -131,11 +122,14 @@
             const errorMessageElement = document.getElementById('errorMessage');
             
             let currentSlideIndex = 0;
-            const slideInterval = 6000; // 6000msec
+            const DEFAULT_SLIDE_INTERVAL = 6;
+            const MIN_SLIDE_INTERVAL = 2;
+            const ZOOM_DURATION = 8;
             let slides = [];
+            let slideTimes = [];
             let slideTimer;
+            let slideEndTime = 0;
             
-            // Netlify FunctionからNotionのデータを取得
             async function fetchImagesFromNotion() {
                 try {
                     const response = await fetch('/.netlify/functions/get-images');
@@ -144,7 +138,6 @@
                     }
                     
                     const data = await response.json();
-                    console.log('Fetched data:', data);
                     return data.images;
                 } catch (error) {
                     console.error('Error fetching images:', error);
@@ -153,7 +146,6 @@
                 }
             }
             
-            // スライドを生成する
             function createSlides(images) {
                 if (!images || images.length === 0) {
                     showError('表示できる画像がありません。Notionデータベースに画像を追加してください。');
@@ -162,68 +154,84 @@
                 
                 slideshowContainer.innerHTML = '';
                 slides = [];
+                slideTimes = [];
                 
                 images.forEach((image, index) => {
                     const slide = document.createElement('div');
                     slide.className = 'slide';
-                    slide.style.backgroundImage = `url('${image.imageUrl}')`;
+                    slide.setAttribute('data-index', index);
                     
+                    const bgImage = document.createElement('div');
+                    bgImage.className = 'bg-image';
+                    bgImage.style.backgroundImage = `url('${image.imageUrl}')`;
+                    bgImage.style.transform = 'scale(1.1)';
+                    
+                    slide.appendChild(bgImage);
                     slideshowContainer.appendChild(slide);
                     slides.push(slide);
+                    
+                    let displayTime = DEFAULT_SLIDE_INTERVAL;
+                    
+                    if (image.time !== undefined && image.time !== null) {
+                        const timeValue = parseFloat(image.time);
+                        if (!isNaN(timeValue)) {
+                            displayTime = Math.max(timeValue, MIN_SLIDE_INTERVAL);
+                        }
+                    }
+                    
+                    slideTimes.push(displayTime);
                 });
                 
-                // 最初のスライドを表示
-                slides[0].classList.add('active');
-                
-                // スライドショーを開始
-                startSlideshow();
-            }
-            
-            // スライドショーを開始
-            function startSlideshow() {
-                // 既存のタイマーをクリア
-                if (slideTimer) {
-                    clearInterval(slideTimer);
+                if (slides.length > 0) {
+                    showSlide(0);
                 }
                 
-                // 新しいタイマーを設定
-                slideTimer = setInterval(nextSlide, slideInterval);
-                
-                // ローディングを非表示
                 loadingElement.style.display = 'none';
             }
             
-            // 次のスライドに切り替え
-            function nextSlide() {
-                if (slides.length <= 1) return;
+            function showSlide(index) {
+                if (index < 0 || index >= slides.length) return;
                 
-                // 次のスライドインデックスを計算
-                const nextSlideIndex = (currentSlideIndex + 1) % slides.length;
+                currentSlideIndex = index;
+                const displayTimeSeconds = slideTimes[index];
+                const displayTimeMs = displayTimeSeconds * 1000;
                 
-                // 次のスライドを表示状態にする（ズームアニメーションは自動的に開始される）
-                slides[nextSlideIndex].classList.add('active');
+                slides.forEach(slide => {
+                    slide.classList.remove('active');
+                });
                 
-                // 現在のスライドのアニメーションを終了し、非アクティブにする（透過処理）
+                const currentSlide = slides[index];
+                currentSlide.classList.add('active');
+                
+                const bgImage = currentSlide.querySelector('.bg-image');
+                bgImage.style.transition = '';
+                bgImage.style.transform = 'scale(1.1)';
+                
+                void bgImage.offsetWidth;
+                
                 setTimeout(() => {
-                    slides[currentSlideIndex].style.opacity = '0';
-                    
-                    // アニメーション終了後に非アクティブにする
-                    setTimeout(() => {
-                        slides[currentSlideIndex].classList.remove('active');
-                        slides[currentSlideIndex].style.removeProperty('opacity');
-                        currentSlideIndex = nextSlideIndex;
-                    }, 1200);
-                }, 100);
+                    bgImage.style.transition = `transform ${ZOOM_DURATION}s linear`;
+                    bgImage.style.transform = 'scale(1.0)';
+                }, 10);
+                
+                if (slideTimer) {
+                    clearTimeout(slideTimer);
+                }
+                
+                slideEndTime = Date.now() + displayTimeMs;
+                
+                slideTimer = setTimeout(() => {
+                    const nextIndex = (index + 1) % slides.length;
+                    showSlide(nextIndex);
+                }, displayTimeMs);
             }
             
-            // エラーメッセージを表示
             function showError(message) {
                 errorMessageElement.textContent = message;
                 errorMessageElement.style.display = 'block';
                 loadingElement.style.display = 'none';
             }
             
-            // 初期化
             async function initialize() {
                 try {
                     const images = await fetchImagesFromNotion();
@@ -234,7 +242,6 @@
                 }
             }
             
-            // アプリケーション開始
             initialize();
         });
     </script>
